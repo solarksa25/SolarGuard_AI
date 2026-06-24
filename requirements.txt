@@ -1,0 +1,14 @@
+flask>=3.0
+flask-login>=0.6
+pymysql>=1.1
+bcrypt>=4.1
+numpy>=1.26
+pandas>=2.2
+scikit-learn>=1.4
+lightgbm>=4.2
+xgboost>=2.0
+catboost>=1.2
+joblib>=1.3
+dbutils>=3.0
+werkzeug>=3.0
+pvlib

@@ -1,0 +1,500 @@
+{% extends "base.html" %}
+{% block title %}Dataset Generator — SolarGuard AI{% endblock %}
+{% block page_title %}Dataset Generator{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+  <div class="mb-6">
+    <h2 class="text-2xl font-bold text-gray-800">Generate Custom Dataset</h2>
+    <p class="text-gray-500 mt-1">Create synthetic faulty datasets using realistic physical simulation (PVLib) based on actual weather and electrical readings.</p>
+  </div>
+
+  <!-- Active Station Metadata Badge -->
+  <div class="bg-gradient-to-r from-solar-500 to-solar-600 text-white rounded-xl p-6 mb-6 shadow-md flex justify-between items-center">
+    <div>
+      <span class="text-xs font-bold uppercase tracking-wider opacity-75">Active Solar Station</span>
+      <h3 class="text-2xl font-bold mt-1">{{ station_name }}</h3>
+    </div>
+    <div class="text-right">
+      <span class="text-xs font-bold uppercase tracking-wider opacity-75">Configured Capacity</span>
+      <div class="text-3xl font-extrabold mt-1">{{ dc_capacity_kw }} <span class="text-lg font-medium">kW</span></div>
+    </div>
+  </div>
+
+  {% if not dataset_exists %}
+  <div class="bg-red-50 border-l-4 border-red-500 p-4 mb-6 rounded-r-lg">
+    <div class="flex items-center gap-3">
+      <span class="material-symbols-outlined text-red-500">error</span>
+      <div>
+        <h3 class="font-bold text-red-800">No Base Datasets Found</h3>
+        <p class="text-sm text-red-700 mt-1">No CSV files were found in the <code class="bg-red-100 px-1 rounded">data/</code> directory. You must place at least one clean base dataset in this directory before you can generate faulty datasets.</p>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="card p-6 mb-6 shadow-sm border border-gray-100">
+    <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Configuration</h3>
+    
+    <!-- ① Full-width Dataset Selector -->
+    <div class="mb-5">
+      <div class="flex items-center justify-between mb-2">
+        <label class="block text-sm font-medium text-gray-700">Base Dataset</label>
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <button type="button" onclick="deleteAllDatasets()" class="text-xs text-red-500 hover:text-red-700 flex items-center gap-0.5">
+          <span class="material-symbols-outlined text-[16px]">delete_sweep</span> Delete All
+        </button>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-2">
+        <select id="datasetDropdown" onchange="selectDataset(this.value)"
+          class="flex-1 border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none bg-white disabled:bg-gray-50 truncate"
+          {% if not available_datasets %}disabled{% endif %}>
+          {% if not available_datasets %}
+          <option value="">No datasets available</option>
+          {% else %}
+          <option value="">-- Select a dataset --</option>
+          {% for ds in available_datasets %}
+          <option value="{{ ds }}">{{ ds }}</option>
+          {% endfor %}
+          {% endif %}
+        </select>
+        {% if current_user.is_authenticated and current_user.role == 'admin' %}
+        <button onclick="deleteSelectedDataset()"
+          class="p-2.5 border border-gray-300 rounded-lg hover:bg-red-50 hover:border-red-200 text-gray-500 hover:text-red-500 transition-colors flex-shrink-0"
+          title="Delete Selected">
+          <span class="material-symbols-outlined text-[20px] block">delete</span>
+        </button>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- ② Drop-zone  |  Total Rows  (side by side) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+
+      <!-- Drop Zone -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">Upload CSV</label>
+        <div id="dropZone"
+          class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:bg-gray-50 transition-colors cursor-pointer relative h-[90px] flex flex-col items-center justify-center"
+          onclick="document.getElementById('fileInput').click()">
+          <input type="file" id="fileInput" accept=".csv" class="hidden" onchange="handleFileSelect(this.files)">
+          <span class="material-symbols-outlined text-gray-400 text-2xl mb-1">upload_file</span>
+          <p class="text-sm font-medium text-gray-700 truncate max-w-full px-2" id="dropZoneText">Drag &amp; Drop CSV or Click</p>
+          <p class="text-xs text-gray-400 mt-0.5" id="dropZoneSubtext"></p>
+          <div id="uploadProgress" class="hidden mt-2 w-full bg-gray-200 rounded-full h-1.5 overflow-hidden relative">
+            <div class="bg-solar-500 h-1.5 rounded-full animate-pulse absolute left-0 top-0 w-full"></div>
+          </div>
+        </div>
+        <input type="hidden" id="uploadedFilename" value="">
+      </div>
+
+      <!-- Total Rows -->
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-2">Total Rows to Generate</label>
+        <div class="relative">
+          <input type="text" pattern="[0-9]+" id="totalRows" value="10000" min="100" max="100000" step="100"
+            class="w-full border border-gray-300 rounded-lg px-4 py-2.5 focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none transition-shadow"
+            {% if not dataset_exists %}disabled{% endif %}>
+          <span class="absolute right-3 top-2.5 text-xs text-gray-400 bg-white px-1">
+            Max: {{ "{:,}".format(total_clean_rows) if total_clean_rows > 0 else 'Unknown' }}
+          </span>
+        </div>
+        <p class="text-xs text-gray-500 mt-1">The system will sample from the clean dataset base.</p>
+      </div>
+
+    </div>
+
+    <!-- Fault Distribution -->
+    <h3 class="text-lg font-bold text-gray-800 mb-4 border-b pb-2">Fault Distribution (%)</h3>
+    <p class="text-sm text-gray-500 mb-4">Specify the percentage of each fault type. The remaining percentage will automatically be assigned as Normal (F0) data.</p>
+    
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4 mb-6">
+      <!-- F1 -->
+      <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <label class="flex justify-between items-center mb-2">
+          <span class="text-sm font-medium text-gray-700 flex items-center gap-1">
+            <span class="w-3 h-3 rounded-full bg-blue-500"></span> Partial Shading
+          </span>
+          <span class="text-xs font-bold text-blue-600 bg-blue-100 px-2 py-0.5 rounded" id="valF1">10%</span>
+        </label>
+        <input type="range" id="sliderF1" class="fault-slider w-full accent-blue-500" min="0" max="100" value="10" data-target="valF1" data-id="1" {% if not dataset_exists %}disabled{% endif %}>
+      </div>
+      
+      <!-- F2 -->
+      <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <label class="flex justify-between items-center mb-2">
+          <span class="text-sm font-medium text-gray-700 flex items-center gap-1">
+            <span class="w-3 h-3 rounded-full bg-amber-500"></span> Soiling
+          </span>
+          <span class="text-xs font-bold text-amber-600 bg-amber-100 px-2 py-0.5 rounded" id="valF2">10%</span>
+        </label>
+        <input type="range" id="sliderF2" class="fault-slider w-full accent-amber-500" min="0" max="100" value="10" data-target="valF2" data-id="2" {% if not dataset_exists %}disabled{% endif %}>
+      </div>
+      
+      <!-- F3 -->
+      <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <label class="flex justify-between items-center mb-2">
+          <span class="text-sm font-medium text-gray-700 flex items-center gap-1">
+            <span class="w-3 h-3 rounded-full bg-orange-500"></span> Degradation
+          </span>
+          <span class="text-xs font-bold text-orange-600 bg-orange-100 px-2 py-0.5 rounded" id="valF3">10%</span>
+        </label>
+        <input type="range" id="sliderF3" class="fault-slider w-full accent-orange-500" min="0" max="100" value="10" data-target="valF3" data-id="3" {% if not dataset_exists %}disabled{% endif %}>
+      </div>
+
+      <!-- F4 -->
+      <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <label class="flex justify-between items-center mb-2">
+          <span class="text-sm font-medium text-gray-700 flex items-center gap-1">
+            <span class="w-3 h-3 rounded-full bg-red-500"></span> Inverter Fault
+          </span>
+          <span class="text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded" id="valF4">5%</span>
+        </label>
+        <input type="range" id="sliderF4" class="fault-slider w-full accent-red-500" min="0" max="100" value="5" data-target="valF4" data-id="4" {% if not dataset_exists %}disabled{% endif %}>
+      </div>
+
+      <!-- F5 -->
+      <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <label class="flex justify-between items-center mb-2">
+          <span class="text-sm font-medium text-gray-700 flex items-center gap-1">
+            <span class="w-3 h-3 rounded-full bg-red-600"></span> Open-Circuit String
+          </span>
+          <span class="text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded" id="valF5">5%</span>
+        </label>
+        <input type="range" id="sliderF5" class="fault-slider w-full accent-red-600" min="0" max="100" value="5" data-target="valF5" data-id="5" {% if not dataset_exists %}disabled{% endif %}>
+      </div>
+
+      <!-- F6 -->
+      <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <label class="flex justify-between items-center mb-2">
+          <span class="text-sm font-medium text-gray-700 flex items-center gap-1">
+            <span class="w-3 h-3 rounded-full bg-red-700"></span> Short-Circuit
+          </span>
+          <span class="text-xs font-bold text-red-700 bg-red-100 px-2 py-0.5 rounded" id="valF6">5%</span>
+        </label>
+        <input type="range" id="sliderF6" class="fault-slider w-full accent-red-700" min="0" max="100" value="5" data-target="valF6" data-id="6" {% if not dataset_exists %}disabled{% endif %}>
+      </div>
+
+      <!-- F7 -->
+      <div class="bg-gray-50 p-3 rounded-lg border border-gray-200">
+        <label class="flex justify-between items-center mb-2">
+          <span class="text-sm font-medium text-gray-700 flex items-center gap-1">
+            <span class="w-3 h-3 rounded-full bg-purple-500"></span> Sensor Fault
+          </span>
+          <span class="text-xs font-bold text-purple-600 bg-purple-100 px-2 py-0.5 rounded" id="valF7">5%</span>
+        </label>
+        <input type="range" id="sliderF7" class="fault-slider w-full accent-purple-500" min="0" max="100" value="5" data-target="valF7" data-id="7" {% if not dataset_exists %}disabled{% endif %}>
+      </div>
+    </div>
+
+    <!-- Summary Bar -->
+    <div class="mb-6">
+      <div class="flex justify-between items-end mb-2">
+        <span class="text-sm font-bold text-gray-800">Total Distribution</span>
+        <span class="text-sm font-bold text-green-600" id="normalPctText">50% Normal</span>
+      </div>
+      <div class="w-full h-4 bg-gray-200 rounded-full overflow-hidden flex" id="distBar">
+        <!-- Filled dynamically via JS -->
+      </div>
+      <div class="mt-2 text-xs text-red-500 font-bold hidden" id="errorMsg">
+        Total fault percentage exceeds 100%! Please reduce some values.
+      </div>
+    </div>
+
+    <!-- Action -->
+    <div class="border-t pt-5 flex justify-end">
+      <button id="generateBtn" onclick="generateDataset()" disabled class="bg-solar-600 hover:bg-solar-700 text-white font-bold py-3 px-6 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center gap-2 disabled:bg-gray-400 disabled:cursor-not-allowed">
+        <span class="material-symbols-outlined">download</span>
+        Generate & Download
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loadingOverlay" class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-50 hidden flex-col items-center justify-center">
+  <div class="bg-white p-8 rounded-xl shadow-2xl max-w-sm w-full text-center">
+    <div class="relative w-20 h-20 mx-auto mb-6">
+      <div class="absolute inset-0 border-4 border-gray-100 rounded-full"></div>
+      <div class="absolute inset-0 border-4 border-solar-500 rounded-full border-t-transparent animate-spin"></div>
+      <span class="material-symbols-outlined absolute inset-0 flex items-center justify-center text-solar-500 text-3xl">science</span>
+    </div>
+    <h3 class="text-xl font-bold text-gray-800 mb-2">Generating Dataset</h3>
+    <p class="text-sm text-gray-500 mb-4">Injecting physical faults via PVLib. This may take a few moments...</p>
+    <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+      <div class="bg-solar-500 h-1.5 rounded-full animate-pulse" style="width: 100%"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const sliders = document.querySelectorAll('.fault-slider');
+const colors = {
+  1: '#3b82f6', // blue
+  2: '#f59e0b', // amber
+  3: '#f97316', // orange
+  4: '#ef4444', // red
+  5: '#dc2626', // red-600
+  6: '#b91c1c', // red-700
+  7: '#a855f7', // purple
+};
+
+function updateDistribution() {
+  let totalFaults = 0;
+  const dist = {};
+  
+  sliders.forEach(slider => {
+    const val = parseInt(slider.value) || 0;
+    const id = slider.getAttribute('data-id');
+    document.getElementById(slider.getAttribute('data-target')).textContent = val + '%';
+    totalFaults += val;
+    if (val > 0) dist[id] = val;
+  });
+
+  const normalPct = 100 - totalFaults;
+  const errorMsg = document.getElementById('errorMsg');
+  const generateBtn = document.getElementById('generateBtn');
+  const normalText = document.getElementById('normalPctText');
+  const distBar = document.getElementById('distBar');
+
+  if (totalFaults > 100) {
+    errorMsg.classList.remove('hidden');
+    generateBtn.disabled = true;
+    normalText.textContent = 'Invalid Distribution';
+    normalText.className = 'text-sm font-bold text-red-600';
+  } else {
+    errorMsg.classList.add('hidden');
+    if (document.getElementById('uploadedFilename').value !== '') {
+      generateBtn.disabled = false;
+    }
+    normalText.textContent = normalPct + '% Normal Data';
+    normalText.className = 'text-sm font-bold text-green-600';
+  }
+
+  // Build progress bar
+  let barHTML = '';
+  // Normal segment
+  if (normalPct > 0) {
+    barHTML += `<div style="width: ${normalPct}%; background-color: #22c55e;" class="h-full transition-all duration-300 relative group"><div class="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Normal: ${normalPct}%</div></div>`;
+  }
+  // Fault segments
+  Object.keys(dist).forEach(id => {
+    barHTML += `<div style="width: ${dist[id]}%; background-color: ${colors[id]};" class="h-full transition-all duration-300 relative group"><div class="absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">F${id}: ${dist[id]}%</div></div>`;
+  });
+  
+  distBar.innerHTML = barHTML;
+}
+
+sliders.forEach(slider => {
+  slider.addEventListener('input', updateDistribution);
+});
+
+// Initial update
+updateDistribution();
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('border-solar-500', 'bg-solar-50');
+});
+dropZone.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('border-solar-500', 'bg-solar-50');
+});
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('border-solar-500', 'bg-solar-50');
+  if (e.dataTransfer.files.length) {
+    handleFileSelect(e.dataTransfer.files);
+  }
+});
+
+function handleFileSelect(files) {
+  const file = files[0];
+  if (!file || !file.name.toLowerCase().endsWith('.csv')) {
+    Swal.fire('Error', 'Please select a CSV file.', 'error');
+    return;
+  }
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  document.getElementById('dropZoneText').textContent = 'Uploading...';
+  document.getElementById('uploadProgress').classList.remove('hidden');
+  
+  fetch('{{ url_for("generate.upload") }}', {
+    method: 'POST',
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    document.getElementById('uploadProgress').classList.add('hidden');
+    if (data.error) {
+      document.getElementById('dropZoneText').textContent = 'Upload failed';
+      Swal.fire('Error', data.error, 'error');
+    } else {
+      document.getElementById('dropZoneText').textContent = data.original_name;
+      document.getElementById('dropZoneText').classList.add('text-green-600');
+      document.getElementById('dropZoneSubtext').textContent = 'File ready for generation';
+      document.getElementById('uploadedFilename').value = data.filename;
+      
+      const errorMsg = document.getElementById('errorMsg');
+      if (errorMsg.classList.contains('hidden')) {
+        document.getElementById('generateBtn').disabled = false;
+      }
+      // Enable inputs
+      document.getElementById('totalRows').disabled = false;
+      document.querySelectorAll('.fault-slider').forEach(slider => {
+        slider.disabled = false;
+      });
+    }
+  })
+  .catch(err => {
+    document.getElementById('uploadProgress').classList.add('hidden');
+    document.getElementById('dropZoneText').textContent = 'Upload failed';
+    Swal.fire('Error', 'Upload failed.', 'error');
+  });
+}
+
+function generateDataset() {
+  const totalRows = document.getElementById('totalRows').value;
+  const baseDataset = document.getElementById('uploadedFilename').value;
+  if (!baseDataset) {
+    Swal.fire('Error', 'Please upload a dataset first.', 'error');
+    return;
+  }
+  const distribution = {};
+  sliders.forEach(slider => {
+    const val = parseInt(slider.value) || 0;
+    if (val > 0) distribution[slider.getAttribute('data-id')] = val;
+  });
+
+  document.getElementById('loadingOverlay').classList.remove('hidden');
+  document.getElementById('loadingOverlay').classList.add('flex');
+
+  fetch('{{ url_for("generate.download") }}', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ totalRows, distribution, baseDataset })
+  })
+  .then(response => {
+    if (!response.ok) {
+      return response.json().then(err => { throw new Error(err.error || 'Generation failed'); });
+    }
+    
+    // Extract filename from Content-Disposition header if possible
+    let filename = `generated_dataset_${totalRows}rows.csv`;
+    const disposition = response.headers.get('Content-Disposition');
+    if (disposition && disposition.indexOf('attachment') !== -1) {
+      const matches = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/.exec(disposition);
+      if (matches != null && matches[1]) filename = matches[1].replace(/['"]/g, '');
+    }
+
+    return response.blob().then(blob => ({ blob, filename }));
+  })
+  .then(({ blob, filename }) => {
+    // Create download link
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.style.display = 'none';
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    
+    document.getElementById('loadingOverlay').classList.add('hidden');
+    document.getElementById('loadingOverlay').classList.remove('flex');
+    Toast.fire({ icon: 'success', title: 'Dataset generated and downloaded!' });
+  })
+  .catch(error => {
+    document.getElementById('loadingOverlay').classList.add('hidden');
+    document.getElementById('loadingOverlay').classList.remove('flex');
+    Swal.fire('Error', error.message, 'error');
+  });
+}
+
+function selectDataset(filename) {
+  if (filename) {
+    document.getElementById('uploadedFilename').value = filename;
+    document.getElementById('dropZoneText').textContent = filename;
+    document.getElementById('dropZoneText').classList.add('text-green-600');
+    document.getElementById('dropZoneSubtext').textContent = 'Dataset ready for generation';
+    
+    // Enable inputs
+    document.getElementById('totalRows').disabled = false;
+    document.querySelectorAll('.fault-slider').forEach(slider => {
+      slider.disabled = false;
+    });
+    
+    const errorMsg = document.getElementById('errorMsg');
+    if (errorMsg && errorMsg.classList.contains('hidden')) {
+      document.getElementById('generateBtn').disabled = false;
+    }
+  } else {
+    document.getElementById('uploadedFilename').value = '';
+    document.getElementById('generateBtn').disabled = true;
+  }
+}
+
+function deleteSelectedDataset() {
+  const dropdown = document.getElementById('datasetDropdown');
+  const filename = dropdown.value;
+  if (!filename) {
+    Swal.fire('Info', 'Please select a dataset to delete.', 'info');
+    return;
+  }
+  
+  Swal.fire({
+    title: 'Delete Dataset?',
+    text: `Are you sure you want to delete ${filename}?`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#ef4444',
+    confirmButtonText: 'Delete'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      fetch(`/generate/delete/${encodeURIComponent(filename)}`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            Toast.fire({ icon: 'success', title: 'Dataset deleted' });
+            setTimeout(() => location.reload(), 800);
+          } else {
+            Swal.fire('Error', data.error || 'Failed to delete dataset', 'error');
+          }
+        })
+        .catch(err => Swal.fire('Error', 'An error occurred', 'error'));
+    }
+  });
+}
+
+function deleteAllDatasets() {
+  Swal.fire({
+    title: 'Delete All Datasets?',
+    text: `This will delete ALL CSV files in the data directory. This cannot be undone.`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#ef4444',
+    confirmButtonText: 'Delete All'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      fetch(`/generate/delete-all`, { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            Toast.fire({ icon: 'success', title: 'All datasets deleted' });
+            setTimeout(() => location.reload(), 800);
+          } else {
+            Swal.fire('Error', data.error || 'Failed to delete datasets', 'error');
+          }
+        })
+        .catch(err => Swal.fire('Error', 'An error occurred', 'error'));
+    }
+  });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,440 @@
+{% extends 'base.html' %}
+{% block title %}Employee Performance Reports — SolarGuard AI{% endblock %}
+{% block page_title %}Reports{% endblock %}
+
+{% block head %}
+<style>
+  .kpi-card {
+    background: #fff;
+    border-radius: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    padding: 1.1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: .9rem;
+  }
+  .kpi-icon {
+    width: 2.75rem; height: 2.75rem;
+    border-radius: .65rem;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .chart-card {
+    background: #fff;
+    border-radius: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+    padding: 1.25rem 1.5rem;
+  }
+  .perf-bar-bg { background:#f1f5f9; border-radius:999px; height:6px; overflow:hidden; }
+  .perf-bar    { height:6px; border-radius:999px; transition:width .5s ease; }
+
+  .rank-gold   { background:linear-gradient(135deg,#f59e0b,#d97706); }
+  .rank-silver { background:linear-gradient(135deg,#94a3b8,#64748b); }
+  .rank-bronze { background:linear-gradient(135deg,#cd7f32,#a0522d); }
+  .rank-other  { background:#f1f5f9; }
+
+  /* ─── PDF styles ─────────────────────────────────── */
+  #pdfOnly { display:none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto space-y-5">
+
+  <!-- Page Header -->
+  <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div>
+      <h2 class="text-2xl font-extrabold text-gray-900">Employee Performance Reports</h2>
+      <p class="text-sm text-gray-500 mt-0.5">Monitor how engineers handle and resolve solar alerts.</p>
+    </div>
+    <button id="exportBtn" onclick="exportToPDF()"
+      class="inline-flex items-center gap-2 bg-solar-600 hover:bg-solar-700 text-white font-bold py-2.5 px-5 rounded-xl shadow hover:shadow-md transition-all text-sm flex-shrink-0">
+      <span class="material-symbols-outlined text-lg">picture_as_pdf</span>
+      Export PDF
+    </button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════
+       SCREEN VIEW
+  ══════════════════════════════════════════════════ -->
+  <div id="screenView" class="space-y-5">
+
+    <!-- KPI Cards -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="kpi-card">
+        <div class="kpi-icon bg-amber-50"><span class="material-symbols-outlined text-amber-500 text-xl">notifications</span></div>
+        <div><p class="text-xl font-extrabold text-gray-900">{{ summary.total_alerts or 0 }}</p><p class="text-xs text-gray-500">Total</p></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon bg-green-50"><span class="material-symbols-outlined text-green-500 text-xl">check_circle</span></div>
+        <div><p class="text-xl font-extrabold text-green-600">{{ summary.total_resolved or 0 }}</p><p class="text-xs text-gray-500">Resolved</p></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon bg-red-50"><span class="material-symbols-outlined text-red-500 text-xl">error</span></div>
+        <div><p class="text-xl font-extrabold text-red-600">{{ summary.total_active or 0 }}</p><p class="text-xs text-gray-500">Active</p></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon bg-blue-50"><span class="material-symbols-outlined text-blue-500 text-xl">search</span></div>
+        <div><p class="text-xl font-extrabold text-blue-600">{{ summary.total_investigating or 0 }}</p><p class="text-xs text-gray-500">Investigating</p></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon bg-gray-100"><span class="material-symbols-outlined text-gray-400 text-xl">snooze</span></div>
+        <div><p class="text-xl font-extrabold text-gray-600">{{ summary.total_snoozed or 0 }}</p><p class="text-xs text-gray-500">Snoozed</p></div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-icon bg-red-50"><span class="material-symbols-outlined text-red-600 text-xl">bolt</span></div>
+        <div><p class="text-xl font-extrabold text-red-700">{{ summary.total_critical or 0 }}</p><p class="text-xs text-gray-500">Critical</p></div>
+      </div>
+    </div>
+
+    <!-- Charts Row -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="chart-card">
+        <p class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+          <span class="material-symbols-outlined text-solar-500 text-lg">trending_up</span>
+          Monthly Resolved (Last 6 Months)
+        </p>
+        <canvas id="trendChart" height="180"></canvas>
+      </div>
+      <div class="chart-card">
+        <p class="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+          <span class="material-symbols-outlined text-solar-500 text-lg">donut_large</span>
+          Fault Type Breakdown (Resolved)
+        </p>
+        <div class="flex flex-col items-center">
+          <canvas id="faultChart" style="max-height:180px;max-width:180px;"></canvas>
+          <div id="faultLegend" class="mt-3 flex flex-wrap gap-x-3 gap-y-1 justify-center text-xs text-gray-600"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Engineer Leaderboard -->
+    <div class="chart-card">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <p class="text-sm font-bold text-gray-700 flex items-center gap-2">
+          <span class="material-symbols-outlined text-solar-500 text-lg">leaderboard</span>
+          Engineer Leaderboard
+        </p>
+        <!-- Live Search -->
+        <div class="relative">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-gray-400 text-lg">search</span>
+          <input id="searchInput" type="text" placeholder="Search name or email…"
+            oninput="filterTable()"
+            class="pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-solar-400 focus:border-solar-400 outline-none w-64">
+        </div>
+      </div>
+
+      {% if performance_data %}
+      {% set max_resolved = performance_data[0].total_resolved or 1 %}
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse" id="empTable">
+          <thead>
+            <tr class="border-b-2 border-gray-100 text-left">
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide w-10">#</th>
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide">Engineer</th>
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide">Email</th>
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide text-center">Resolved</th>
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide min-w-[120px]">Progress</th>
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide text-center">Avg Time</th>
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide text-center">Fast&nbsp;&lt;1h</th>
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide text-center">Slow&nbsp;≥1h</th>
+              <th class="py-2.5 px-3 text-xs font-bold text-gray-400 uppercase tracking-wide text-center">Score</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-50" id="empTbody">
+            {% for emp in performance_data %}
+            {% set rank     = loop.index %}
+            {% set resolved = emp.total_resolved or 0 %}
+            {% set fast     = emp.fast_resolutions or 0 %}
+            {% set slow     = emp.slow_resolutions or 0 %}
+            {% set avg      = emp.avg_resolution_time_min or 0 %}
+            {% set score    = ((fast * 2) - slow) if resolved > 0 else 0 %}
+            {% set pct      = ((resolved / max_resolved) * 100) | int %}
+            <tr class="hover:bg-gray-50/60 transition-colors emp-row"
+                data-name="{{ emp.full_name | lower }}"
+                data-email="{{ emp.email | lower }}">
+              <td class="py-3 px-3">
+                {% if rank == 1 %}
+                  <div class="w-6 h-6 rounded-full rank-gold flex items-center justify-center text-white font-black text-xs shadow">1</div>
+                {% elif rank == 2 %}
+                  <div class="w-6 h-6 rounded-full rank-silver flex items-center justify-center text-white font-black text-xs shadow">2</div>
+                {% elif rank == 3 %}
+                  <div class="w-6 h-6 rounded-full rank-bronze flex items-center justify-center text-white font-black text-xs shadow">3</div>
+                {% else %}
+                  <div class="w-6 h-6 rounded-full rank-other flex items-center justify-center text-gray-400 font-bold text-xs">{{ rank }}</div>
+                {% endif %}
+              </td>
+              <td class="py-3 px-3">
+                <div class="flex items-center gap-2">
+                  <div class="w-7 h-7 rounded-full flex items-center justify-center text-white font-black text-xs flex-shrink-0"
+                       style="background:linear-gradient(135deg,#f59e0b,#d97706)">
+                    {{ emp.full_name[0] | upper }}
+                  </div>
+                  <span class="font-semibold text-gray-800">{{ emp.full_name }}</span>
+                </div>
+              </td>
+              <td class="py-3 px-3 text-gray-500 text-xs">{{ emp.email }}</td>
+              <td class="py-3 px-3 text-center">
+                <span class="inline-flex items-center justify-center w-8 h-8 rounded-full font-extrabold text-sm
+                  {% if resolved >= 10 %}bg-green-100 text-green-700
+                  {% elif resolved >= 5 %}bg-amber-100 text-amber-700
+                  {% else %}bg-gray-100 text-gray-500{% endif %}">
+                  {{ resolved }}
+                </span>
+              </td>
+              <td class="py-3 px-3">
+                <div class="perf-bar-bg">
+                  <div class="perf-bar {% if pct >= 80 %}bg-green-500{% elif pct >= 50 %}bg-amber-500{% else %}bg-gray-300{% endif %}"
+                       style="width:{{ pct }}%"></div>
+                </div>
+                <p class="text-xs text-gray-400 mt-0.5">{{ pct }}%</p>
+              </td>
+              <td class="py-3 px-3 text-center text-xs font-medium text-gray-600">
+                {% if avg %}{% if avg < 60 %}{{ avg | int }}m{% else %}{{ (avg/60)|round(1) }}h{% endif %}{% else %}—{% endif %}
+              </td>
+              <td class="py-3 px-3 text-center">
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-green-50 text-green-700">{{ fast }}</span>
+              </td>
+              <td class="py-3 px-3 text-center">
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-50 text-amber-700">{{ slow }}</span>
+              </td>
+              <td class="py-3 px-3 text-center">
+                <span class="font-extrabold text-sm {% if score > 10 %}text-green-600{% elif score > 0 %}text-amber-600{% else %}text-gray-400{% endif %}">
+                  {{ score }}
+                </span>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <!-- No results -->
+        <div id="noResults" class="hidden text-center py-8 text-gray-400 text-sm">
+          <span class="material-symbols-outlined text-3xl block mb-1 text-gray-200">search_off</span>
+          No engineers match your search.
+        </div>
+      </div>
+      <p class="text-xs text-gray-400 mt-3 italic">* Score = (Fast × 2) − Slow. Higher is better.</p>
+      {% else %}
+      <div class="py-12 text-center">
+        <span class="material-symbols-outlined text-5xl text-gray-200 mb-3 block">inbox</span>
+        <p class="text-gray-400 text-sm">No engineer performance data available yet.</p>
+      </div>
+      {% endif %}
+    </div>
+  </div><!-- /#screenView -->
+
+  <!-- ══════════════════════════════════════════════════
+       PDF-ONLY PRINTABLE VIEW (hidden on screen)
+  ══════════════════════════════════════════════════ -->
+  <div id="pdfContent" style="display:none; font-family:Arial,sans-serif; font-size:11px; color:#111; padding:24px;">
+
+    <!-- Letterhead -->
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #f59e0b; padding-bottom:14px; margin-bottom:18px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        {% if logo_data_uri %}
+        <img src="{{ logo_data_uri }}" alt="SolarGuard AI"
+             style="width:42px;height:42px;border-radius:8px;object-fit:cover;">
+        {% else %}
+        <div style="width:42px;height:42px;border-radius:8px;background:linear-gradient(135deg,#f59e0b,#d97706);display:flex;align-items:center;justify-content:center;color:#fff;font-size:20px;font-weight:900;">S</div>
+        {% endif %}
+        <div>
+          <div style="font-size:16px;font-weight:900;color:#111;">SolarGuard <span style="color:#f59e0b;">AI</span></div>
+          <div style="font-size:9px;font-weight:700;color:#9ca3af;letter-spacing:1px;text-transform:uppercase;">Employee Performance Report</div>
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:9px;color:#9ca3af;font-weight:600;">GENERATED</div>
+        <div style="font-size:12px;font-weight:700;color:#374151;" id="pdfDate">—</div>
+      </div>
+    </div>
+
+    <!-- KPI Row -->
+    <div style="display:flex; gap:8px; margin-bottom:18px;">
+      <div style="flex:1;background:#fffbeb;border-radius:8px;padding:10px 12px;border-left:3px solid #f59e0b;">
+        <div style="font-size:18px;font-weight:900;color:#111;">{{ summary.total_alerts or 0 }}</div>
+        <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;">Total Alerts</div>
+      </div>
+      <div style="flex:1;background:#f0fdf4;border-radius:8px;padding:10px 12px;border-left:3px solid #22c55e;">
+        <div style="font-size:18px;font-weight:900;color:#16a34a;">{{ summary.total_resolved or 0 }}</div>
+        <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;">Resolved</div>
+      </div>
+      <div style="flex:1;background:#fef2f2;border-radius:8px;padding:10px 12px;border-left:3px solid #ef4444;">
+        <div style="font-size:18px;font-weight:900;color:#dc2626;">{{ summary.total_active or 0 }}</div>
+        <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;">Active</div>
+      </div>
+      <div style="flex:1;background:#eff6ff;border-radius:8px;padding:10px 12px;border-left:3px solid #3b82f6;">
+        <div style="font-size:18px;font-weight:900;color:#2563eb;">{{ summary.total_investigating or 0 }}</div>
+        <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;">Investigating</div>
+      </div>
+      <div style="flex:1;background:#f8fafc;border-radius:8px;padding:10px 12px;border-left:3px solid #94a3b8;">
+        <div style="font-size:18px;font-weight:900;color:#475569;">{{ summary.total_snoozed or 0 }}</div>
+        <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;">Snoozed</div>
+      </div>
+      <div style="flex:1;background:#fef2f2;border-radius:8px;padding:10px 12px;border-left:3px solid #b91c1c;">
+        <div style="font-size:18px;font-weight:900;color:#b91c1c;">{{ summary.total_critical or 0 }}</div>
+        <div style="font-size:9px;color:#6b7280;font-weight:600;text-transform:uppercase;">Critical</div>
+      </div>
+    </div>
+
+    <!-- Section title -->
+    <div style="font-size:12px;font-weight:800;color:#374151;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #e5e7eb;">
+      Engineer Performance Leaderboard
+    </div>
+
+    <!-- Table -->
+    <table style="width:100%;border-collapse:collapse;font-size:10px;">
+      <thead>
+        <tr style="background:#f9fafb;">
+          <th style="padding:7px 8px;text-align:left;color:#6b7280;font-weight:700;font-size:9px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">#</th>
+          <th style="padding:7px 8px;text-align:left;color:#6b7280;font-weight:700;font-size:9px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Engineer</th>
+          <th style="padding:7px 8px;text-align:left;color:#6b7280;font-weight:700;font-size:9px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Email</th>
+          <th style="padding:7px 8px;text-align:center;color:#6b7280;font-weight:700;font-size:9px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Resolved</th>
+          <th style="padding:7px 8px;text-align:center;color:#6b7280;font-weight:700;font-size:9px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Avg Time</th>
+          <th style="padding:7px 8px;text-align:center;color:#6b7280;font-weight:700;font-size:9px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Fast &lt;1h</th>
+          <th style="padding:7px 8px;text-align:center;color:#6b7280;font-weight:700;font-size:9px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Slow ≥1h</th>
+          <th style="padding:7px 8px;text-align:center;color:#6b7280;font-weight:700;font-size:9px;text-transform:uppercase;border-bottom:2px solid #e5e7eb;">Score</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for emp in performance_data %}
+        {% set resolved = emp.total_resolved or 0 %}
+        {% set fast     = emp.fast_resolutions or 0 %}
+        {% set slow     = emp.slow_resolutions or 0 %}
+        {% set avg      = emp.avg_resolution_time_min or 0 %}
+        {% set score    = ((fast * 2) - slow) if resolved > 0 else 0 %}
+        <tr style="border-bottom:1px solid #f3f4f6; {% if loop.index is odd %}background:#ffffff;{% else %}background:#f9fafb;{% endif %}">
+          <td style="padding:6px 8px;font-weight:700;color:{% if loop.index==1 %}#d97706{% elif loop.index==2 %}#64748b{% elif loop.index==3 %}#a0522d{% else %}#9ca3af{% endif %};">{{ loop.index }}</td>
+          <td style="padding:6px 8px;font-weight:700;color:#111;">{{ emp.full_name }}</td>
+          <td style="padding:6px 8px;color:#6b7280;">{{ emp.email }}</td>
+          <td style="padding:6px 8px;text-align:center;font-weight:800;color:{% if resolved >= 10 %}#16a34a{% elif resolved >= 5 %}#d97706{% else %}#374151{% endif %};">{{ resolved }}</td>
+          <td style="padding:6px 8px;text-align:center;color:#374151;">{% if avg %}{% if avg < 60 %}{{ avg | int }}m{% else %}{{ (avg/60)|round(1) }}h{% endif %}{% else %}—{% endif %}</td>
+          <td style="padding:6px 8px;text-align:center;font-weight:700;color:#16a34a;">{{ fast }}</td>
+          <td style="padding:6px 8px;text-align:center;font-weight:700;color:#d97706;">{{ slow }}</td>
+          <td style="padding:6px 8px;text-align:center;font-weight:800;color:{% if score > 10 %}#16a34a{% elif score > 0 %}#d97706{% else %}#9ca3af{% endif %};">{{ score }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" style="padding:16px;text-align:center;color:#9ca3af;">No data available.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    <!-- Footer -->
+    <div style="margin-top:20px;padding-top:10px;border-top:1px solid #e5e7eb;text-align:center;font-size:9px;color:#9ca3af;">
+      SolarGuard AI — Confidential System Report &nbsp;|&nbsp; <span id="pdfFooterDate">—</span>
+    </div>
+  </div><!-- /#pdfContent -->
+
+</div><!-- /.max-w-7xl -->
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+<script>
+// ── Date ──────────────────────────────────────────────────────
+const now    = new Date();
+const dateStr = now.toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' });
+document.getElementById('pdfDate').textContent      = dateStr;
+document.getElementById('pdfFooterDate').textContent = dateStr;
+
+// ── Chart data ────────────────────────────────────────────────
+const trendLabels = {{ monthly_trend | map(attribute='month')        | list | tojson }};
+const trendValues = {{ monthly_trend | map(attribute='resolved_count')| list | tojson }};
+const faultLabels = {{ fault_breakdown | map(attribute='alert_type') | list | tojson }};
+const faultValues = {{ fault_breakdown | map(attribute='cnt')        | list | tojson }};
+
+const PALETTE = ['#f59e0b','#3b82f6','#10b981','#ef4444','#8b5cf6','#f97316','#06b6d4','#ec4899','#84cc16'];
+
+// ── Monthly Trend Bar Chart ────────────────────────────────────
+new Chart(document.getElementById('trendChart').getContext('2d'), {
+  type: 'bar',
+  data: {
+    labels: trendLabels.length ? trendLabels : ['No Data'],
+    datasets: [{
+      label: 'Resolved',
+      data: trendValues.length ? trendValues : [0],
+      backgroundColor: 'rgba(245,158,11,.18)',
+      borderColor: '#f59e0b',
+      borderWidth: 2,
+      borderRadius: 6,
+      borderSkipped: false,
+    }]
+  },
+  options: {
+    responsive: true,
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { beginAtZero:true, grid:{ color:'#f1f5f9' }, ticks:{ precision:0 } },
+      x: { grid:{ display:false } }
+    }
+  }
+});
+
+// ── Fault Doughnut Chart ───────────────────────────────────────
+if (faultLabels.length) {
+  new Chart(document.getElementById('faultChart').getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: faultLabels,
+      datasets: [{ data: faultValues, backgroundColor: PALETTE, borderWidth:2, borderColor:'#fff', hoverOffset:6 }]
+    },
+    options: { cutout:'62%', plugins:{ legend:{ display:false } }, responsive:true }
+  });
+  const lg = document.getElementById('faultLegend');
+  faultLabels.forEach((l,i) => {
+    lg.innerHTML += `<span style="display:flex;align-items:center;gap:4px;">
+      <span style="width:9px;height:9px;border-radius:50%;background:${PALETTE[i]};display:inline-block;flex-shrink:0;"></span>${l} (${faultValues[i]})
+    </span>`;
+  });
+} else {
+  document.getElementById('faultChart').parentElement.innerHTML =
+    '<p class="text-center text-gray-400 text-sm py-10">No resolved fault data yet.</p>';
+}
+
+// ── Live Search ───────────────────────────────────────────────
+function filterTable() {
+  const q = document.getElementById('searchInput').value.toLowerCase().trim();
+  const rows = document.querySelectorAll('#empTbody .emp-row');
+  let visible = 0;
+  rows.forEach(row => {
+    const name  = row.dataset.name  || '';
+    const email = row.dataset.email || '';
+    const match = name.includes(q) || email.includes(q);
+    row.style.display = match ? '' : 'none';
+    if (match) visible++;
+  });
+  document.getElementById('noResults').classList.toggle('hidden', visible > 0);
+}
+
+// ── PDF Export ────────────────────────────────────────────────
+function exportToPDF() {
+  const btn = document.getElementById('exportBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="material-symbols-outlined text-lg">hourglass_empty</span> Generating…';
+
+  const el = document.getElementById('pdfContent');
+  el.style.display = 'block';
+
+  const opt = {
+    margin:      [8, 10, 8, 10],   // mm
+    filename:    `solarguard_report_${now.toISOString().slice(0,10)}.pdf`,
+    image:       { type:'jpeg', quality:0.97 },
+    html2canvas: { scale:2, useCORS:true, logging:false },
+    jsPDF:       { unit:'mm', format:'a4', orientation:'portrait' }
+  };
+
+  html2pdf().set(opt).from(el).save()
+    .then(() => {
+      el.style.display = 'none';
+      btn.disabled = false;
+      btn.innerHTML = '<span class="material-symbols-outlined text-lg">picture_as_pdf</span> Export PDF';
+      Toast.fire({ icon:'success', title:'PDF exported successfully!' });
+    })
+    .catch(() => {
+      el.style.display = 'none';
+      btn.disabled = false;
+      btn.innerHTML = '<span class="material-symbols-outlined text-lg">picture_as_pdf</span> Export PDF';
+      Toast.fire({ icon:'error', title:'PDF export failed.' });
+    });
+}
+</script>
+{% endblock %}

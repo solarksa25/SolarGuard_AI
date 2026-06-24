@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block title %}Alerts — SolarGuard AI{% endblock %}
+{% block page_title %}Alerts{% endblock %}
+
+{% block content %}
+<!-- Summary Cards -->
+<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+  <div class="card p-5 flex items-center gap-4">
+    <div class="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center">
+      <span class="material-symbols-outlined text-2xl text-red-500">error</span>
+    </div>
+    <div>
+      <p class="text-2xl font-bold text-gray-800">{{ counts.active_count or 0 }}</p>
+      <p class="text-xs text-gray-500">Active Alerts</p>
+    </div>
+  </div>
+  <div class="card p-5 flex items-center gap-4">
+    <div class="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center">
+      <span class="material-symbols-outlined text-2xl text-amber-500">warning</span>
+    </div>
+    <div>
+      <p class="text-2xl font-bold text-gray-800">{{ counts.critical_count or 0 }}</p>
+      <p class="text-xs text-gray-500">Critical Active</p>
+    </div>
+  </div>
+  <div class="card p-5 flex items-center gap-4">
+    <div class="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center">
+      <span class="material-symbols-outlined text-2xl text-green-500">check_circle</span>
+    </div>
+    <div>
+      <p class="text-2xl font-bold text-gray-800">{{ counts.resolved_today or 0 }}</p>
+      <p class="text-xs text-gray-500">Resolved Today</p>
+    </div>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="card p-5 mb-6">
+  <form id="filterForm" method="GET" action="{{ url_for('alerts.index') }}" class="flex flex-wrap items-center gap-4">
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-gray-600">Status:</label>
+      <select name="status" onchange="this.form.submit()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none">
+        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+        <option value="investigating" {% if status_filter == 'investigating' %}selected{% endif %}>Investigating</option>
+        <option value="resolved" {% if status_filter == 'resolved' %}selected{% endif %}>Resolved</option>
+        <option value="snoozed" {% if status_filter == 'snoozed' %}selected{% endif %}>Snoozed</option>
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-gray-600">Severity:</label>
+      <select name="severity" onchange="this.form.submit()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none">
+        <option value="all" {% if severity_filter == 'all' %}selected{% endif %}>All</option>
+        <option value="critical" {% if severity_filter == 'critical' %}selected{% endif %}>Critical</option>
+        <option value="warning" {% if severity_filter == 'warning' %}selected{% endif %}>Warning</option>
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-gray-600">Type:</label>
+      <select name="alert_type" onchange="this.form.submit()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none">
+        <option value="all" {% if type_filter == 'all' %}selected{% endif %}>All Faults</option>
+        <option value="Partial Shading" {% if type_filter == 'Partial Shading' %}selected{% endif %}>Partial Shading</option>
+        <option value="Soiling" {% if type_filter == 'Soiling' %}selected{% endif %}>Soiling</option>
+        <option value="Degradation" {% if type_filter == 'Degradation' %}selected{% endif %}>Degradation</option>
+        <option value="Inverter Fault" {% if type_filter == 'Inverter Fault' %}selected{% endif %}>Inverter Fault</option>
+        <option value="Open-Circuit String" {% if type_filter == 'Open-Circuit String' %}selected{% endif %}>Open-Circuit String</option>
+        <option value="Short-Circuit" {% if type_filter == 'Short-Circuit' %}selected{% endif %}>Short-Circuit</option>
+        <option value="Sensor Fault" {% if type_filter == 'Sensor Fault' %}selected{% endif %}>Sensor Fault</option>
+      </select>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-gray-600">From:</label>
+      <input type="date" name="start_date" value="{{ start_date }}" onchange="this.form.submit()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none">
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-gray-600">To:</label>
+      <input type="date" name="end_date" value="{{ end_date }}" onchange="this.form.submit()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none">
+    </div>
+
+    <a href="{{ url_for('alerts.index') }}" class="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">
+      <span class="material-symbols-outlined text-lg">restart_alt</span> Reset
+    </a>
+    {% if current_user.is_authenticated and current_user.role == 'admin' %}
+    <button type="button" onclick="deleteAllAlerts()" class="ml-auto text-sm text-red-500 hover:text-red-700 flex items-center gap-1">
+      <span class="material-symbols-outlined text-lg">delete_sweep</span> Delete All
+    </button>
+    {% endif %}
+  </form>
+</div>
+
+<!-- Alerts Table -->
+<div class="card p-0 overflow-hidden">
+  {% if alerts %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-gray-50 border-b border-gray-200">
+          <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Severity</th>
+          <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Type</th>
+          <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Source</th>
+          <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Description</th>
+          <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Status</th>
+          <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Detected</th>
+          <th class="text-left py-3 px-4 text-xs font-semibold text-gray-500 uppercase">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for alert in alerts %}
+        <tr class="border-b border-gray-50 hover:bg-gray-50/50">
+          <td class="py-3 px-4">
+            {% if alert.severity == 'critical' %}
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700"><span class="material-symbols-outlined text-sm">error</span>Critical</span>
+            {% elif alert.severity == 'warning' %}
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700"><span class="material-symbols-outlined text-sm">warning</span>Warning</span>
+            {% else %}
+            <span class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700"><span class="material-symbols-outlined text-sm">check_circle</span>Normal</span>
+            {% endif %}
+          </td>
+          <td class="py-3 px-4 font-medium text-gray-700">{{ alert.alert_type or '—' }}</td>
+          <td class="py-3 px-4 text-gray-500">{{ alert.source_key or '—' }}</td>
+          <td class="py-3 px-4 text-gray-600 max-w-xs truncate">{{ alert.description or '—' }}</td>
+          <td class="py-3 px-4">
+            {% if alert.status == 'active' %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-red-50 text-red-700">
+              <span class="material-symbols-outlined text-xs">circle</span>Active
+            </span>
+            {% elif alert.status == 'resolved' %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700">
+              <span class="material-symbols-outlined text-xs">check_circle</span>Resolved
+            </span>
+            {% elif alert.status == 'snoozed' %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-600">
+              <span class="material-symbols-outlined text-xs">snooze</span>Snoozed
+            </span>
+            {% elif alert.status == 'investigating' %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700">
+              <span class="material-symbols-outlined text-xs">search</span>Investigating
+            </span>
+            {% else %}
+            <span class="text-xs text-gray-500">{{ alert.status }}</span>
+            {% endif %}
+          </td>
+          <td class="py-3 px-4 text-gray-400 text-xs whitespace-nowrap">{{ alert.detected_at.strftime('%m/%d %H:%M') if alert.detected_at else '—' }}</td>
+          <td class="py-3 px-4" onclick="event.stopPropagation()">
+            <div class="flex items-center gap-1">
+              <button onclick="viewAlert('{{ alert.id }}', '{{ alert.alert_type }}', '{{ alert.description | replace('\'', '\\\'') }}', '{{ alert.severity }}')" title="View Details" class="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 hover:text-blue-700 transition-colors">
+                <span class="material-symbols-outlined text-lg">visibility</span>
+              </button>
+              {% if alert.status == 'snoozed' %}
+              {# Snoozed: show Reactivate + Resolve #}
+              <button onclick="reactivateAlert({{ alert.id }})" title="Reactivate" class="p-1.5 rounded-lg hover:bg-orange-50 text-orange-500 hover:text-orange-700 transition-colors">
+                <span class="material-symbols-outlined text-lg">alarm</span>
+              </button>
+              <button onclick="resolveAlert({{ alert.id }})" title="Resolve" class="p-1.5 rounded-lg hover:bg-green-50 text-green-600 hover:text-green-700 transition-colors">
+                <span class="material-symbols-outlined text-lg">check_circle</span>
+              </button>
+              {% elif alert.status in ['active', 'investigating'] %}
+              {# Active / Investigating: show Investigate + Resolve + Snooze #}
+              {% if alert.status == 'active' %}
+              <button onclick="investigateAlert({{ alert.id }})" title="Investigate" class="p-1.5 rounded-lg hover:bg-indigo-50 text-indigo-500 hover:text-indigo-700 transition-colors">
+                <span class="material-symbols-outlined text-lg">search</span>
+              </button>
+              {% endif %}
+              <button onclick="resolveAlert({{ alert.id }})" title="Resolve" class="p-1.5 rounded-lg hover:bg-green-50 text-green-600 hover:text-green-700 transition-colors">
+                <span class="material-symbols-outlined text-lg">check_circle</span>
+              </button>
+              <button onclick="snoozeAlert({{ alert.id }})" title="Snooze" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700 transition-colors">
+                <span class="material-symbols-outlined text-lg">snooze</span>
+              </button>
+              {% endif %}
+              {% if current_user.is_authenticated and current_user.role == 'admin' %}
+              <button onclick="deleteAlert({{ alert.id }})" title="Delete" class="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors">
+                <span class="material-symbols-outlined text-lg">delete</span>
+              </button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="text-center py-16">
+    <span class="material-symbols-outlined text-5xl text-gray-200 mb-3 block">notifications_off</span>
+    <h3 class="text-lg font-semibold text-gray-400 mb-2">No Alerts Found</h3>
+    <p class="text-sm text-gray-400">No alerts match the current filter criteria. System is operating normally.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- View Alert Modal (hidden) -->
+<div id="viewModal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" onclick="hideViewModal()"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-w-lg">
+    <div class="bg-white rounded-2xl shadow-2xl p-6">
+      <div class="flex items-center justify-between mb-5">
+        <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <span class="material-symbols-outlined text-solar-500">info</span>
+          Alert Details
+        </h3>
+        <button onclick="hideViewModal()" class="p-1 rounded-lg hover:bg-gray-100">
+          <span class="material-symbols-outlined text-gray-400">close</span>
+        </button>
+      </div>
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div class="bg-gray-50 rounded-lg p-3">
+            <p class="text-xs text-gray-500 mb-1">Fault Type</p>
+            <p id="modalType" class="text-sm font-semibold text-gray-800">—</p>
+          </div>
+          <div class="bg-gray-50 rounded-lg p-3">
+            <p class="text-xs text-gray-500 mb-1">Severity</p>
+            <p id="modalSeverity" class="text-sm font-semibold text-gray-800">—</p>
+          </div>
+        </div>
+        <div class="bg-gray-50 rounded-lg p-3">
+          <p class="text-xs text-gray-500 mb-1">Description</p>
+          <p id="modalDesc" class="text-sm text-gray-700">—</p>
+        </div>
+        <div class="bg-solar-50/50 rounded-lg p-4 border border-solar-100">
+          <div class="flex items-start gap-3">
+            <span class="material-symbols-outlined text-solar-500 mt-0.5">lightbulb</span>
+            <div>
+              <p class="text-xs font-semibold text-solar-700 mb-1">AI Recommendation</p>
+              <p id="modalRec" class="text-sm text-gray-600">—</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mt-6 flex justify-end">
+        <button type="button" onclick="hideViewModal()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-6 rounded-xl text-sm transition-colors">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// AI Fault Recommendations — matches all 8 fault types
+const faultRecommendations = {
+  'Normal': 'All systems operating normally. No maintenance required. Continue regular monitoring schedule.',
+  'Partial Shading': 'Partial shading detected on the array. Inspect for nearby vegetation growth, new structures, or debris casting shadows on panels. Check bypass diodes for proper operation. Consider trimming trees or relocating obstructions.',
+  'Soiling': 'Soiling/dust accumulation detected. DC power output reduced uniformly. Schedule panel cleaning within 24-48 hours. Use dry brushing or water wash depending on dust severity. Monitor PR trend after cleaning.',
+  'Degradation': 'Panel degradation detected — output reduced below expected levels for current conditions. Compare against historical baseline. If degradation exceeds 15% of rated output, consider panel replacement. Schedule IV curve tracing.',
+  'Inverter Fault': 'Inverter fault detected — significant AC output collapse. Shut down affected inverter immediately. Check internal fuses, IGBT modules, and DC-link capacitors. Contact manufacturer support if fault persists after reset.',
+  'Open-Circuit String': 'Open-circuit string detected — one or more strings disconnected. Check string fuses and combiner box connections. Inspect wiring for loose MC4 connectors, corrosion, or rodent damage. Verify string voltage at the combiner.',
+  'Short-Circuit': 'Short-circuit detected — abnormal current flow in a string. Isolate affected string immediately to prevent fire risk. Inspect for water ingress, damaged insulation, or failed bypass diodes. Do not reconnect until root cause is identified.',
+  'Sensor Fault': 'Sensor fault detected — readings from temperature or irradiance sensors appear corrupted or stuck. Verify sensor wiring and calibration. Replace faulty sensors. Cross-check with neighboring inverter readings for validation.',
+};
+
+// Provide a function that Jinja can use (though we handle it in JS)
+function getFaultRec(faultType) {
+  return faultRecommendations[faultType] || 'Inspect the system and consult the maintenance manual.';
+}
+
+function viewAlert(id, type, desc, severity) {
+  document.getElementById('modalType').textContent = type || 'Unknown';
+  document.getElementById('modalSeverity').textContent = (severity || '').toUpperCase();
+  document.getElementById('modalDesc').textContent = desc || 'No description available.';
+  document.getElementById('modalRec').textContent = getFaultRec(type);
+  document.getElementById('viewModal').classList.remove('hidden');
+}
+
+function hideViewModal() {
+  document.getElementById('viewModal').classList.add('hidden');
+}
+
+function resolveAlert(alertId) {
+  Swal.fire({
+    title: 'Resolve Alert?', text: 'This will mark the alert as resolved.',
+    icon: 'question', showCancelButton: true, confirmButtonColor: '#22c55e',
+    confirmButtonText: 'Resolve', cancelButtonText: 'Cancel'
+  }).then(result => {
+    if (result.isConfirmed) {
+      fetch(`/alerts/${alertId}/resolve`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(r => r.json()).then(data => {
+          if (data.success) { Toast.fire({ icon: 'success', title: 'Alert resolved' }); setTimeout(() => location.reload(), 800); }
+        });
+    }
+  });
+}
+
+function snoozeAlert(alertId) {
+  fetch(`/alerts/${alertId}/snooze`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(r => r.json()).then(data => {
+      if (data.success) { Toast.fire({ icon: 'info', title: 'Alert snoozed' }); setTimeout(() => location.reload(), 800); }
+    });
+}
+
+function reactivateAlert(alertId) {
+  fetch(`/alerts/${alertId}/reactivate`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(r => r.json()).then(data => {
+      if (data.success) { Toast.fire({ icon: 'warning', title: 'Alert reactivated' }); setTimeout(() => location.reload(), 800); }
+    });
+}
+
+function investigateAlert(alertId) {
+  fetch(`/alerts/${alertId}/investigate`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    .then(r => r.json()).then(data => {
+      if (data.success) { Toast.fire({ icon: 'success', title: 'Alert marked as investigating' }); setTimeout(() => location.reload(), 800); }
+    });
+}
+
+function deleteAlert(alertId) {
+  Swal.fire({
+    title: 'Delete Alert?', text: 'This action cannot be undone.',
+    icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444',
+    confirmButtonText: 'Delete', cancelButtonText: 'Cancel'
+  }).then(result => {
+    if (result.isConfirmed) {
+      fetch(`/alerts/${alertId}/delete`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(r => r.json()).then(data => {
+          if (data.success) { Toast.fire({ icon: 'success', title: 'Alert deleted' }); setTimeout(() => location.reload(), 800); }
+        });
+    }
+  });
+}
+
+function deleteAllAlerts() {
+  Swal.fire({
+    title: 'Delete ALL Alerts?', text: 'This will permanently remove all alerts. This cannot be undone.',
+    icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444',
+    confirmButtonText: 'Delete All', cancelButtonText: 'Cancel'
+  }).then(result => {
+    if (result.isConfirmed) {
+      fetch('{{ url_for("alerts.delete_all_alerts") }}', { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+        .then(r => r.json()).then(data => {
+          if (data.success) { Toast.fire({ icon: 'success', title: 'All alerts deleted' }); setTimeout(() => location.reload(), 800); }
+        });
+    }
+  });
+}
+
+
+</script>
+{% endblock %}

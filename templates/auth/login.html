@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sign In | SolarGuard AI</title>
+  <link rel="icon" type="image/png" href="/static/img/logo.png"/>
+  <script src="https://cdn.tailwindcss.com?plugins=forms"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+  <style>
+    body { font-family:'Inter',sans-serif; margin:0; overflow:hidden; }
+    .hero-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; mix-blend-mode:multiply; opacity:.55; }
+    .hero-overlay { position:absolute; inset:0; background:linear-gradient(160deg,#FEF3C7 0%,#F59E0B 60%,#EF6C00 100%); }
+    .hero-glow { position:absolute; top:-5%; left:50%; transform:translateX(-50%); width:120%; height:60%; background:radial-gradient(circle,rgba(255,255,255,.45) 0%,rgba(255,255,255,0) 70%); pointer-events:none; }
+    .input-field { display:block; width:100%; height:44px; padding:0 44px 0 44px; border:1.5px solid #E5E7EB; border-radius:10px; font-size:13px; outline:none; transition:border-color .2s,box-shadow .2s; background:#fff; box-sizing:border-box; }
+    .input-field:focus { border-color:#F59E0B; box-shadow:0 0 0 3px rgba(245,158,11,.15); }
+    .btn-primary { width:100%; height:46px; background:linear-gradient(135deg,#F59E0B,#EF6C00); color:#fff; font-size:14px; font-weight:700; border:none; border-radius:10px; cursor:pointer; transition:all .2s; box-shadow:0 4px 14px rgba(245,158,11,.35); }
+    .btn-primary:hover { transform:translateY(-1px); box-shadow:0 6px 20px rgba(245,158,11,.45); }
+    .btn-primary:active { transform:scale(.98); }
+    @media(max-width:1024px) {
+      body { overflow: auto !important; }
+      main { height: auto !important; min-height: 100vh !important; }
+      .hero-left { display: none !important; }
+      .right-panel { width: 100% !important; min-height: 100vh !important; display: flex !important; align-items: center !important; justify-content: center !important; background: #FFFBF5 !important; padding: 24px !important; }
+    }
+  </style>
+</head>
+<body class="antialiased text-slate-900">
+<main class="flex h-screen">
+
+  <!-- LEFT PANEL -->
+  <section class="hero-left relative flex flex-col justify-between p-14 text-white overflow-hidden" style="width:55%">
+    <div class="hero-overlay"></div>
+    <img class="hero-img" src="https://images.unsplash.com/photo-1509391366360-2e959784a276?w=1200&q=80" alt="Solar Farm"/>
+    <div class="hero-glow"></div>
+
+    <!-- Brand -->
+    <div class="relative z-10 flex items-center gap-3">
+      <img src="/static/img/logo.png" alt="SolarGuard AI" class="w-10 h-10 object-contain drop-shadow-lg"/>
+      <span class="text-lg font-bold tracking-tight">SolarGuard AI</span>
+    </div>
+
+    <!-- Headline -->
+    <div class="relative z-10">
+      <h1 class="text-5xl font-extrabold leading-tight mb-4" style="text-shadow:0 4px 16px rgba(0,0,0,.2)">Power Your<br/>Future.</h1>
+      <p class="text-base text-white/90 max-w-sm font-medium leading-relaxed">AI-driven solar intelligence — detect faults before they cost you.</p>
+    </div>
+
+   
+  </section>
+
+  <!-- RIGHT PANEL -->
+  <section class="right-panel flex items-center justify-center px-8" style="width:45%; background:#FFFBF5">
+    <div class="w-full max-w-[460px] bg-white rounded-2xl p-10 shadow-[0_20px_60px_rgba(0,0,0,0.08)] border border-slate-50">
+
+      <!-- Logo -->
+      <div class="flex items-center gap-3 mb-7">
+        <img src="/static/img/logo.png" alt="SolarGuard AI" class="w-10 h-10 object-contain"/>
+        <span class="text-lg font-bold text-slate-800">SolarGuard AI</span>
+      </div>
+
+      <h2 class="text-2xl font-extrabold text-slate-900 mb-1">Welcome back 👋</h2>
+      <p class="text-sm text-gray-500 mb-8">Sign in to continue to your monitoring dashboard.</p>
+
+      <!-- Error -->
+      {% if error %}
+      <div class="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm font-medium px-4 py-3 rounded-xl mb-5">
+        <svg class="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
+        {{ error }}
+      </div>
+      {% endif %}
+
+      <form method="POST" action="{{ url_for('auth.login') }}" class="space-y-5">
+
+        <!-- Email -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5" for="email">Email Address</label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+              <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg>
+            </div>
+            <input id="email" name="email" type="email" required autocomplete="email"
+              class="input-field" style="padding-left: 44px; padding-right: 12px;"/>
+          </div>
+        </div>
+
+        <!-- Password -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5" for="password">Password</label>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg>
+            </div>
+            <input id="password" name="password" type="password" required autocomplete="current-password"
+              class="input-field" style="padding-left: 44px; padding-right: 44px;"/>
+            <!-- Eye toggle — right side -->
+            <button type="button" onclick="togglePwd()" class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-gray-400 hover:text-amber-500 transition-colors">
+              <svg id="eyeIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-primary mt-2">Sign In →</button>
+      </form>
+
+      <p class="mt-8 text-center text-[10px] text-gray-400">© <script>document.write(new Date().getFullYear())</script> SolarGuard AI · All rights reserved</p>
+    </div>
+  </section>
+
+</main>
+<script>
+function togglePwd() {
+  const inp = document.getElementById('password');
+  const icon = document.getElementById('eyeIcon');
+  if(inp.type === 'password') {
+    inp.type = 'text';
+    icon.innerHTML = '<path d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>';
+  } else {
+    inp.type = 'password';
+    icon.innerHTML = '<path d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>';
+  }
+}
+</script>
+</body>
+</html>

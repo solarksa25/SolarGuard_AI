@@ -1,0 +1,90 @@
+{
+  "version": "universal_v1",
+  "description": "Capacity-agnostic models. Work on any solar station.",
+  "feature_cols": [
+    "NORM_DC_POWER",
+    "NORM_AC_POWER",
+    "NORM_DC_VOLTAGE",
+    "NORM_DC_CURRENT",
+    "NORM_POWER_VOLATILITY",
+    "NORM_CURRENT_IMBALANCE",
+    "NORM_VOLTAGE_SPREAD",
+    "DC_AC_RATIO",
+    "EFFICIENCY",
+    "PERFORMANCE_RATIO",
+    "DC_AC_DEV",
+    "AMBIENT_TEMP",
+    "MODULE_TEMP",
+    "TEMP_COEFF",
+    "TEMP_DIFFERENCE",
+    "TEMP_DEV",
+    "WIND_SPEED",
+    "IRRADIATION",
+    "CLEARNESS_INDEX",
+    "DIFFUSE_RATIO",
+    "CLOUD_COVER_EST",
+    "SKY_TEMP_EST",
+    "ZENITH_ANGLE",
+    "AZIMUTH_ANGLE",
+    "HOUR",
+    "DAY_OF_YEAR",
+    "MONTH"
+  ],
+  "num_features": 27,
+  "normalized_features": [
+    "NORM_DC_POWER",
+    "NORM_AC_POWER",
+    "NORM_DC_VOLTAGE",
+    "NORM_DC_CURRENT",
+    "NORM_POWER_VOLATILITY",
+    "NORM_CURRENT_IMBALANCE",
+    "NORM_VOLTAGE_SPREAD"
+  ],
+  "universal_features": [
+    "DC_AC_RATIO",
+    "EFFICIENCY",
+    "PERFORMANCE_RATIO",
+    "DC_AC_DEV",
+    "AMBIENT_TEMP",
+    "MODULE_TEMP",
+    "TEMP_COEFF",
+    "TEMP_DIFFERENCE",
+    "TEMP_DEV",
+    "WIND_SPEED",
+    "IRRADIATION",
+    "CLEARNESS_INDEX",
+    "DIFFUSE_RATIO",
+    "CLOUD_COVER_EST",
+    "SKY_TEMP_EST",
+    "ZENITH_ANGLE",
+    "AZIMUTH_ANGLE",
+    "HOUR",
+    "DAY_OF_YEAR",
+    "MONTH"
+  ],
+  "fault_labels": {
+    "0": "Normal",
+    "1": "Partial Shading",
+    "2": "Soiling",
+    "3": "Degradation",
+    "4": "Inverter Fault",
+    "5": "Open-Circuit String",
+    "6": "Short-Circuit",
+    "7": "Sensor Fault"
+  },
+  "performance": {
+    "LightGBM": {
+      "accuracy": 0.8618,
+      "f1": 0.8628
+    },
+    "XGBoost": {
+      "accuracy": 0.8568,
+      "f1": 0.8577
+    },
+    "CatBoost": {
+      "accuracy": 0.838,
+      "f1": 0.8388
+    }
+  },
+  "best_model": "LightGBM"
+}

@@ -1,0 +1,511 @@
+{% extends "base.html" %}
+{% block title %}Live Monitor — SolarGuard AI{% endblock %}
+{% block page_title %}Live Monitor{% endblock %}
+
+{% block head %}
+<style>
+  .live-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; animation: livePulse 1.5s ease-in-out infinite; }
+  @keyframes livePulse { 0%,100% { opacity: 1; box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { opacity: 0.7; box-shadow: 0 0 0 8px rgba(239,68,68,0); } }
+  .chart-container { position: relative; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Control Panel -->
+<div class="card p-5 mb-6">
+  <div class="flex flex-wrap items-center gap-4">
+    <!-- Status -->
+    <div class="flex items-center gap-2 mr-4">
+      <span id="statusDot" class="live-dot bg-gray-400"></span>
+      <span id="statusText" class="text-sm font-semibold text-gray-600">Stopped</span>
+    </div>
+
+    <!-- Dataset Upload -->
+    <div class="flex items-center gap-2">
+      <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg px-3 py-1.5 text-center hover:bg-gray-50 transition-colors cursor-pointer relative min-w-[180px]" onclick="document.getElementById('fileInput').click()">
+        <input type="file" id="fileInput" accept=".csv" class="hidden" onchange="handleFileSelect(this.files)">
+        <div class="flex items-center justify-center gap-1">
+          <span class="material-symbols-outlined text-gray-400 text-lg">upload_file</span>
+          <span class="text-xs font-medium text-gray-700 truncate max-w-[140px]" id="dropZoneText">Upload CSV Dataset</span>
+        </div>
+        <div id="uploadProgress" class="hidden absolute bottom-0 left-0 w-full bg-gray-200 h-1 overflow-hidden rounded-b-lg">
+          <div class="bg-solar-500 h-1 rounded-full animate-pulse absolute left-0 top-0 w-full"></div>
+        </div>
+      </div>
+      <input type="hidden" id="uploadedFilename" value="">
+    </div>
+
+    <!-- AI Model -->
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-gray-600">AI Model:</label>
+      <select id="modelSelect" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none min-w-[150px]">
+        <option value="lgb">LightGBM (Rec.)</option>
+        <option value="xgb">XGBoost</option>
+        <option value="cb">CatBoost</option>
+      </select>
+    </div>
+
+    <!-- Speed -->
+    <div class="flex items-center gap-2">
+      <label class="text-xs font-medium text-gray-600">Speed:</label>
+      <select id="speedSelect" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-solar-500 focus:border-solar-500 outline-none">
+        <option value="1">1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+        <option value="8">8x</option>
+        <option value="12">12x</option>
+      </select>
+    </div>
+
+    <!-- Buttons -->
+    <div class="flex items-center gap-2 ml-auto">
+      <button id="startBtn" onclick="startSim()"
+        class="bg-green-500 hover:bg-green-600 text-white font-semibold px-4 py-2 rounded-lg text-sm flex items-center gap-1.5 transition-colors">
+        <span class="material-symbols-outlined text-lg">play_arrow</span> Start
+      </button>
+      <button id="stopBtn" onclick="stopSim()" disabled
+        class="bg-red-500 hover:bg-red-600 text-white font-semibold px-4 py-2 rounded-lg text-sm flex items-center gap-1.5 transition-colors disabled:bg-gray-300">
+        <span class="material-symbols-outlined text-lg">stop</span> Stop
+      </button>
+
+      <button onclick="resetSim()"
+        class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold px-4 py-2 rounded-lg text-sm flex items-center gap-1.5 transition-colors">
+        <span class="material-symbols-outlined text-lg">restart_alt</span> Reset
+      </button>
+    </div>
+  </div>
+
+  <!-- Progress -->
+  <div class="mt-4 flex items-center gap-3">
+    <div class="flex-1 bg-gray-200 rounded-full h-2 overflow-hidden">
+      <div id="progressBar" class="bg-solar-500 h-2 rounded-full transition-all duration-300" style="width:0%"></div>
+    </div>
+    <span id="progressText" class="text-xs text-gray-500 font-mono w-24 text-right">0%</span>
+    <span id="stepText" class="text-xs text-gray-400">Step 0{% if row_count %} / {{ row_count }}{% endif %}</span>
+  </div>
+</div>
+
+<!-- Top KPIs -->
+<div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+  <div class="card p-4 text-center">
+    <p class="text-xs text-gray-500 mb-1">Raw DC Power</p>
+    <p id="kpiDcPower" class="text-xl font-bold text-gray-800">—</p>
+  </div>
+  <div class="card p-4 text-center">
+    <p class="text-xs text-gray-500 mb-1">Raw AC Power</p>
+    <p id="kpiAcPower" class="text-xl font-bold text-gray-800">—</p>
+  </div>
+  <div class="card p-4 text-center">
+    <p class="text-xs text-gray-500 mb-1">Irradiance</p>
+    <p id="kpiIrr" class="text-xl font-bold text-solar-600">—</p>
+  </div>
+  <div class="card p-4 text-center">
+    <p class="text-xs text-gray-500 mb-1">Health Score</p>
+    <p id="kpiHealth" class="text-xl font-bold text-green-600">—</p>
+  </div>
+  <div class="card p-4 text-center">
+    <p class="text-xs text-gray-500 mb-1">AI Detected</p>
+    <p id="kpiDetected" class="text-xl font-bold text-gray-800">—</p>
+  </div>
+</div>
+
+<!-- Charts Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+  <!-- DC Power Chart -->
+  <div class="card p-5">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+      <span class="material-symbols-outlined text-solar-500">bolt</span>
+      Raw DC Power
+    </h3>
+    <div class="chart-container" style="height:240px;">
+      <canvas id="dcPowerChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Health Score Timeline -->
+  <div class="card p-5">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+      <span class="material-symbols-outlined text-solar-500">health_and_safety</span>
+      Health Score Timeline
+    </h3>
+    <div class="chart-container" style="height:240px;">
+      <canvas id="healthChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Irradiance Chart -->
+  <div class="card p-5">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+      <span class="material-symbols-outlined text-solar-500">wb_sunny</span>
+      Irradiance
+    </h3>
+    <div class="chart-container" style="height:240px;">
+      <canvas id="irradianceChart"></canvas>
+    </div>
+  </div>
+
+  <!-- AI Inference Panel -->
+  <div class="card p-5">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+      <span class="material-symbols-outlined text-solar-500">psychology</span>
+      AI Inference Result
+    </h3>
+    <div id="aiPanel" class="space-y-3">
+      <div id="aiEmpty" class="text-center py-8">
+        <span class="material-symbols-outlined text-4xl text-gray-200 mb-2 block">psychology</span>
+        <p class="text-sm text-gray-400">Start simulation to see AI inference results</p>
+      </div>
+      <div id="aiResult" class="hidden space-y-3">
+        <div class="flex items-center justify-between bg-gray-50 rounded-lg p-3">
+          <div>
+            <p class="text-xs text-gray-500">Detected Fault</p>
+            <p id="aiFaultType" class="text-sm font-bold">—</p>
+          </div>
+          <div class="text-right">
+            <p class="text-xs text-gray-500">Confidence</p>
+            <p id="aiConfidence" class="text-sm font-bold">—</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-3">
+          <p class="text-xs text-gray-500">Severity:</p>
+          <span id="aiSeverity">—</span>
+        </div>
+        <div>
+          <p class="text-xs text-gray-500 mb-1">Fault Probabilities</p>
+          <div id="aiProbBars" class="space-y-1.5"></div>
+        </div>
+        <div id="aiRecommendation" class="bg-solar-50 rounded-lg p-3 hidden">
+          <p class="text-xs font-semibold text-solar-700 mb-1">Recommendation</p>
+          <p id="aiRecText" class="text-xs text-gray-600"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Alerts Log -->
+<div class="card p-5">
+  <h3 class="text-sm font-semibold text-gray-700 mb-4 flex items-center gap-2">
+    <span class="material-symbols-outlined text-solar-500">notifications_active</span>
+    Live Alerts Log
+  </h3>
+  <div id="alertsLog" class="max-h-64 overflow-y-auto space-y-2">
+    <div id="alertsEmpty" class="text-center py-6">
+      <p class="text-sm text-gray-400">No alerts yet. Start the simulation to begin monitoring.</p>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const FAULT_RECS = {
+  0:'System operating normally. No action required.',
+  1:'Partial shading detected. Inspect for obstructions and check bypass diodes.',
+  2:'Dust/soiling detected. Schedule panel cleaning within 24-48 hours.',
+  3:'Degradation detected. Compare against baseline and consider IV curve tracing.',
+  4:'Inverter fault! Shut down affected inverter. Check fuses and IGBT modules.',
+  5:'Open-circuit string detected. Check fuses and MC4 connectors.',
+  6:'Short-circuit detected! Isolate affected string immediately.',
+  7:'Sensor fault detected. Verify sensor wiring and calibration.'
+};
+
+const faultColorMap = {
+  'Normal':'#22c55e','Partial Shading':'#3b82f6','Soiling':'#f59e0b',
+  'Degradation':'#f97316','Inverter Fault':'#ef4444','Open-Circuit String':'#dc2626',
+  'Short-Circuit':'#b91c1c','Sensor Fault':'#8b5cf6'
+};
+
+let tickInterval = null;
+let running = false;
+
+// Charts
+const chartOpts = {
+  responsive: true, maintainAspectRatio: false, animation: { duration: 300 },
+  scales: { x: { display: true, grid: { display: false }, ticks: { maxTicksLimit: 8, font: { size: 10 } } }, y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' }, ticks: { font: { size: 10 } } } },
+  plugins: { legend: { labels: { boxWidth: 10, font: { size: 10 } } } }
+};
+
+const dcChart = new Chart(document.getElementById('dcPowerChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'DC Power (W)', data: [], borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.08)', fill: true, tension: 0.3, pointRadius: 1 },
+  ]},
+  options: { ...chartOpts }
+});
+
+const hChart = new Chart(document.getElementById('healthChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'Health %', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', fill: true, tension: 0.3, pointRadius: 1
+  }]},
+  options: { ...chartOpts, scales: { ...chartOpts.scales, y: { ...chartOpts.scales.y, min: 0, max: 105 } } }
+});
+
+const irrChart = new Chart(document.getElementById('irradianceChart'), {
+  type: 'line',
+  data: { labels: [], datasets: [{
+    label: 'Irradiance (W/m²)', data: [], borderColor: '#f59e0b', backgroundColor: 'rgba(245,158,11,0.08)', fill: true, tension: 0.3, pointRadius: 1
+  }]},
+  options: { ...chartOpts }
+});
+
+// Controls
+function updateUI(isRunning) {
+  running = isRunning;
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+
+  if (isRunning) {
+    dot.className = 'live-dot bg-red-500';
+    txt.textContent = 'Running';
+    txt.className = 'text-sm font-semibold text-red-600';
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+  } else {
+    dot.className = 'live-dot bg-gray-400';
+    txt.textContent = 'Stopped';
+    txt.className = 'text-sm font-semibold text-gray-600';
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+}
+
+function startSim() {
+  const datasetFile = document.getElementById('uploadedFilename').value;
+  if (!datasetFile) {
+    Swal.fire('Error', 'Please upload a dataset first.', 'error');
+    return;
+  }
+  const modelKey = document.getElementById('modelSelect').value;
+  const speed = parseInt(document.getElementById('speedSelect').value);
+
+  fetch('{{ url_for("live_monitor.start") }}', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dataset_file: datasetFile, model_key: modelKey, speed })
+  }).then(r => r.json()).then(() => {
+    updateUI(true);
+    if (tickInterval) clearInterval(tickInterval);
+    tickInterval = setInterval(pollTick, 1200);
+    pollTick();
+  });
+}
+
+function stopSim() {
+  fetch('{{ url_for("live_monitor.stop") }}', { method: 'POST' })
+    .then(r => r.json()).then(() => {
+      updateUI(false);
+      if (tickInterval) { clearInterval(tickInterval); tickInterval = null; }
+    });
+}
+
+function resetSim() {
+  stopSim();
+  fetch('{{ url_for("live_monitor.reset") }}', { method: 'POST' })
+    .then(r => r.json()).then(() => {
+      // Clear charts
+      dcChart.data.labels = []; dcChart.data.datasets[0].data = []; dcChart.update();
+      hChart.data.labels = []; hChart.data.datasets[0].data = []; hChart.update();
+      irrChart.data.labels = []; irrChart.data.datasets[0].data = []; irrChart.update();
+      document.getElementById('progressBar').style.width = '0%';
+      document.getElementById('progressText').textContent = '0%';
+      document.getElementById('stepText').textContent = 'Step 0';
+      document.getElementById('alertsLog').innerHTML = '<div id="alertsEmpty" class="text-center py-6"><p class="text-sm text-gray-400">No alerts yet. Start the simulation to begin monitoring.</p></div>';
+      document.getElementById('aiEmpty').classList.remove('hidden');
+      document.getElementById('aiResult').classList.add('hidden');
+      ['kpiDcPower','kpiAcPower','kpiIrr','kpiHealth','kpiDetected'].forEach(id => document.getElementById(id).textContent = '—');
+    });
+}
+
+function pollTick() {
+  fetch('{{ url_for("live_monitor.tick") }}')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.running) {
+        if (data.done) {
+          Toast.fire({ icon: 'info', title: 'Simulation complete!' });
+        }
+        updateUI(false);
+        if (tickInterval) { clearInterval(tickInterval); tickInterval = null; }
+        return;
+      }
+
+      // Progress
+      document.getElementById('progressBar').style.width = data.progress + '%';
+      document.getElementById('progressText').textContent = data.progress + '%';
+      document.getElementById('stepText').textContent = `Step ${data.step} / ${data.total_rows}`;
+
+      // KPIs
+      document.getElementById('kpiDcPower').textContent = data.dc_power.toLocaleString() + ' W';
+      document.getElementById('kpiAcPower').textContent = data.ac_power.toLocaleString() + ' W';
+      document.getElementById('kpiIrr').textContent = data.irr.toFixed(3);
+      document.getElementById('kpiHealth').textContent = data.health + '%';
+      document.getElementById('kpiHealth').className = 'text-xl font-bold ' + healthColor(data.health);
+      document.getElementById('kpiDetected').innerHTML = faultBadge(data.fault_id);
+
+      // Update charts from history
+      if (data.history && data.history.length > 0) {
+        const hist = data.history;
+        const labels = hist.map(h => h.time.length > 16 ? h.time.slice(11, 16) : h.time);
+
+        dcChart.data.labels = labels;
+        dcChart.data.datasets[0].data = hist.map(h => h.dc_power);
+        dcChart.update('none');
+
+        hChart.data.labels = labels;
+        hChart.data.datasets[0].data = hist.map(h => h.health);
+        hChart.update('none');
+
+        irrChart.data.labels = labels;
+        irrChart.data.datasets[0].data = hist.map(h => Math.round(h.irr * 1000));
+        irrChart.update('none');
+      }
+
+      // AI Inference Panel
+      if (data.ai_result) {
+        const ai = data.ai_result;
+        document.getElementById('aiEmpty').classList.add('hidden');
+        document.getElementById('aiResult').classList.remove('hidden');
+
+        const fid = ai.fault_label_id !== undefined ? ai.fault_label_id : 0;
+        document.getElementById('aiFaultType').innerHTML = faultBadge(fid);
+        document.getElementById('aiConfidence').textContent = (ai.fault_prob * 100).toFixed(1) + '%';
+        document.getElementById('aiSeverity').innerHTML = severityBadge(ai.severity);
+
+        // Probability bars
+        const probsDiv = document.getElementById('aiProbBars');
+        if (ai.fault_probs) {
+          probsDiv.innerHTML = Object.entries(ai.fault_probs).map(([name, prob]) => {
+            const color = faultColorMap[name] || '#94a3b8';
+            const pct = (prob * 100).toFixed(1);
+            return `<div class="flex items-center gap-2">
+              <span class="text-xs text-gray-600 w-28 truncate">${name}</span>
+              <div class="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                <div class="h-2 rounded-full" style="width:${pct}%;background:${color}"></div>
+              </div>
+              <span class="text-xs text-gray-500 w-10 text-right">${pct}%</span>
+            </div>`;
+          }).join('');
+        }
+
+        // Recommendation
+        const recCard = document.getElementById('aiRecommendation');
+        const recText = document.getElementById('aiRecText');
+        if (fid !== 0 && FAULT_RECS[fid]) {
+          recCard.classList.remove('hidden');
+          recText.textContent = FAULT_RECS[fid];
+        } else {
+          recCard.classList.add('hidden');
+        }
+      }
+
+      // New alerts
+      if (data.new_alerts && data.new_alerts.length > 0) {
+        for (const alert of data.new_alerts) {
+          addAlertToLog(alert);
+        }
+      }
+    })
+    .catch(err => { console.error('Tick error:', err); });
+}
+
+function addAlertToLog(alert) {
+  const container = document.getElementById('alertsLog');
+  const empty = document.getElementById('alertsEmpty');
+  if (empty) empty.remove();
+
+  const sevColors = { normal:'border-green-300 bg-green-50', warning:'border-amber-300 bg-amber-50', critical:'border-red-300 bg-red-50' };
+  const sevIcons = { normal:'check_circle', warning:'warning', critical:'error' };
+  const sc = sevColors[alert.severity] || 'border-gray-300 bg-gray-50';
+  const si = sevIcons[alert.severity] || 'info';
+
+  const div = document.createElement('div');
+  div.className = `border-l-4 ${sc} rounded-r-lg p-3 flex items-start gap-3`;
+  div.innerHTML = `
+    <span class="material-symbols-outlined text-lg mt-0.5 ${alert.severity === 'critical' ? 'text-red-500' : alert.severity === 'warning' ? 'text-amber-500' : 'text-green-500'}">${si}</span>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-semibold text-gray-700">${alert.fault_type || '—'}</span>
+        ${severityBadge(alert.severity)}
+        <span class="text-xs text-gray-400 ml-auto">${alert.time || ''}</span>
+      </div>
+      <p class="text-xs text-gray-600 mt-1">${alert.message || ''}</p>
+    </div>
+  `;
+  container.insertBefore(div, container.firstChild);
+
+  // Keep max 50
+  while (container.children.length > 50) container.removeChild(container.lastChild);
+
+  // Toast for critical
+  if (alert.severity === 'critical') {
+    Toast.fire({ icon: 'error', title: alert.message || 'Critical Alert', timer: 5000 });
+  }
+}
+
+const dropZone = document.getElementById('dropZone');
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('border-solar-500', 'bg-solar-50');
+});
+dropZone.addEventListener('dragleave', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('border-solar-500', 'bg-solar-50');
+});
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('border-solar-500', 'bg-solar-50');
+  if (e.dataTransfer.files.length) {
+    handleFileSelect(e.dataTransfer.files);
+  }
+});
+
+function handleFileSelect(files) {
+  const file = files[0];
+  if (!file || !file.name.toLowerCase().endsWith('.csv')) {
+    Swal.fire('Error', 'Please select a CSV file.', 'error');
+    return;
+  }
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  document.getElementById('dropZoneText').textContent = 'Uploading...';
+  document.getElementById('uploadProgress').classList.remove('hidden');
+  
+  fetch('{{ url_for("live_monitor.upload") }}', {
+    method: 'POST',
+    body: formData
+  })
+  .then(response => response.json())
+  .then(data => {
+    document.getElementById('uploadProgress').classList.add('hidden');
+    if (data.error) {
+      document.getElementById('dropZoneText').textContent = 'Upload failed';
+      Swal.fire('Error', data.error, 'error');
+    } else {
+      document.getElementById('dropZoneText').textContent = data.original_name;
+      document.getElementById('dropZoneText').classList.add('text-green-600');
+      document.getElementById('uploadedFilename').value = data.filename;
+    }
+  })
+  .catch(err => {
+    document.getElementById('uploadProgress').classList.add('hidden');
+    document.getElementById('dropZoneText').textContent = 'Upload failed';
+    Swal.fire('Error', 'Upload failed.', 'error');
+  });
+}
+
+// Initial status check
+fetch('{{ url_for("live_monitor.status") }}')
+  .then(r => r.json())
+  .then(data => {
+    if (data.running) {
+      updateUI(true);
+      tickInterval = setInterval(pollTick, 1200);
+    }
+  });
+</script>
+{% endblock %}
